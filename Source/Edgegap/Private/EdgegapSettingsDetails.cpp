@@ -8,7 +8,7 @@
 #include "DetailWidgetRow.h"
 #include "Widgets/Input/SButton.h"
 #include "Settings/ProjectPackagingSettings.h"
-#include "Settings/PlatformsMenuSettings.h"
+// #include "Settings/PlatformsMenuSettings.h" // UE5 only
 #include "EditorDirectories.h"
 #include "Fonts/SlateFontInfo.h"
 #include "Kismet/KismetMathLibrary.h"
@@ -214,12 +214,11 @@ namespace{
 		}
 
 		UProjectPackagingSettings* PackagingSettings = Cast<UProjectPackagingSettings>(UProjectPackagingSettings::StaticClass()->GetDefaultObject());
-		UPlatformsMenuSettings* PlatformsSettings = GetMutableDefault<UPlatformsMenuSettings>();
 
 		FString PluginDir = IPluginManager::Get().FindPlugin(FString("EdgegapIntegrationKit"))->GetBaseDir();
 		FString DockerFilePath = FPaths::Combine(PluginDir, FString("Dockerfile"));
 		FString StartScriptPath = FPaths::Combine(PluginDir, FString("StartServer.sh"));
-		FString ServerBuildPath = PlatformsSettings->StagingDirectory.Path; // PackagingSettings->StagingDirectory.Path;
+		FString ServerBuildPath = PackagingSettings->StagingDirectory.Path;
 		ServerBuildPath = FPaths::Combine(ServerBuildPath, FString("LinuxServer"));
 
 
@@ -353,29 +352,11 @@ namespace{
 
 	UProjectPackagingSettings* GetPackagingSettingsForPlatform(FName IniPlatformName)
 	{
-		FString PlatformString = IniPlatformName.ToString();
-		UProjectPackagingSettings* PackagingSettings = nullptr;
-		for (TObjectIterator<UProjectPackagingSettings> Itr; Itr; ++Itr)
-		{
-			if (Itr->GetConfigPlatform() == PlatformString)
-			{
-				PackagingSettings = *Itr;
-				break;
-			}
-		}
-		if (PackagingSettings == nullptr)
-		{
-			PackagingSettings = NewObject<UProjectPackagingSettings>(GetTransientPackage());
-			// Prevent object from being GCed.
-			PackagingSettings->AddToRoot();
-			// make sure any changes to DefaultGame are updated in this class
-			PackagingSettings->LoadSettingsForPlatform(PlatformString);
-		}
-
-		return PackagingSettings;
+		// UE4.27: No per-platform packaging settings; use the single global default.
+		return GetMutableDefault<UProjectPackagingSettings>();
 	}
 
-	bool ShouldBuildProject(UProjectPackagingSettings* PackagingSettings, const ITargetPlatform* TargetPlatform)
+	bool ShouldBuildProject(UProjectPackagingSettings* PackagingSettings, const ITargetPlatform* TargetPlatform, const FString& InUBTPlatformString)
 	{
 		const UProjectPackagingSettings::FConfigurationInfo& ConfigurationInfo = UProjectPackagingSettings::ConfigurationInfo[(int)PackagingSettings->BuildConfiguration];
 
@@ -436,7 +417,7 @@ namespace{
 				}
 
 				// Check if the receipt is for a matching promoted target
-				FString UBTPlatformName = TargetPlatform->GetTargetPlatformInfo().DataDrivenPlatformInfo->UBTPlatformString;
+				FString UBTPlatformName = InUBTPlatformString;
 				
 				bool HasPromotedTarget(const TCHAR * BaseDir, const TCHAR * TargetName, const TCHAR * Platform, EBuildConfiguration Configuration, const TCHAR * Architecture);
 				if (HasPromotedTarget(*BaseDir, *TargetName, *UBTPlatformName, ConfigurationInfo.Configuration, nullptr))
@@ -997,33 +978,22 @@ void FEdgegapSettingsDetails::PackageProject(const FName IniPlatformName)
 
 	// get a in-memory defaults which will have the user-settings, like the per-platform config/target platform stuff
 	UProjectPackagingSettings* AllPlatformPackagingSettings = GetMutableDefault<UProjectPackagingSettings>();
-	UPlatformsMenuSettings* PlatformsSettings = GetMutableDefault<UPlatformsMenuSettings>();
 
-	// installed builds only support standard Game type builds (not Client, Server, etc) so instead of looking up a setting that the user can't set, 
+	// In UE4.27 there is no UPlatformsMenuSettings; staging directory lives on UProjectPackagingSettings.
+	// installed builds only support standard Game type builds (not Client, Server, etc) so instead of looking up a setting that the user can't set,
 	// always use the base PlatformInfo for Game builds, which will be named the same as the platform itself
-	const PlatformInfo::FTargetPlatformInfo* PlatformInfo = nullptr;
-	if (FApp::IsInstalled())
-	{
-		PlatformInfo = PlatformInfo::FindPlatformInfo(IniPlatformName);
-	}
-	else
-	{
-		PlatformInfo = PlatformInfo::FindPlatformInfo(PlatformsSettings->GetTargetFlavorForPlatform(IniPlatformName));
-	}
+	const FPlatformInfo* PlatformInfo = PlatformInfo::FindPlatformInfo(IniPlatformName);
 	// this is unexpected to be able to happen, but it could if there was a bad value saved in the UProjectPackagingSettings - if this trips, we should handle errors
 	check(PlatformInfo != nullptr);
 
-	const FString UBTPlatformString = PlatformInfo->DataDrivenPlatformInfo->UBTPlatformString;
+	const FString UBTPlatformString = PlatformInfo->UBTPlatformString;
 	const FString ProjectPath = GetProjectPathForTurnkey();
 
 	// check that we can proceed
 	{
 		if (FInstalledPlatformInfo::Get().IsPlatformMissingRequiredFile(UBTPlatformString))
 		{
-			if (!FInstalledPlatformInfo::OpenInstallerOptions())
-			{
-				FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("MissingPlatformFilesCook", "Missing required files to cook for this platform."));
-			}
+			FMessageDialog::Open(EAppMsgType::Ok, LOCTEXT("MissingPlatformFilesCook", "Missing required files to cook for this platform."));
 			return;
 		}
 
@@ -1047,13 +1017,8 @@ void FEdgegapSettingsDetails::PackageProject(const FName IniPlatformName)
 		BuildCookRunParams += FString::Printf(TEXT(" -project=\"%s\""), *ProjectPath);
 	}
 
-	bool bIsProjectBuildTarget = false;
-	const FTargetInfo* BuildTargetInfo = PlatformsSettings->GetBuildTargetInfoForPlatform(IniPlatformName, bIsProjectBuildTarget);
-
-	// Only add the -Target=... argument for code projects. Content projects will return UnrealGame/UnrealClient/UnrealServer here, but
-	// may need a temporary target generated to enable/disable plugins. Specifying -Target in these cases will cause packaging to fail,
-	// since it'll have a different name.
-	if (BuildTargetInfo && bIsProjectBuildTarget)
+	// In UE4.27, GetBuildTargetInfo() is on UProjectPackagingSettings directly (no per-platform variant).
+	// Always add the target so the server build is targeted correctly.
 	{
 		UEdgegapSettings* EdgegapSettings = GetMutableDefault<UEdgegapSettings>();
 		if(EdgegapSettings->OverridableTargetName.IsEmpty())
@@ -1106,27 +1071,27 @@ void FEdgegapSettingsDetails::PackageProject(const FName IniPlatformName)
 #endif
 
 		// let the user pick a target directory
-		if (PlatformsSettings->StagingDirectory.Path.IsEmpty())
+		if (PackagingSettings->StagingDirectory.Path.IsEmpty())
 		{
-			PlatformsSettings->StagingDirectory.Path = FPaths::ProjectDir();
+			PackagingSettings->StagingDirectory.Path = FPaths::ProjectDir();
 		}
 
 		FString OutFolderName;
 
-		if (!FDesktopPlatformModule::Get()->OpenDirectoryDialog(FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr), LOCTEXT("PackageDirectoryDialogTitle", "Package project...").ToString(), PlatformsSettings->StagingDirectory.Path, OutFolderName))
+		if (!FDesktopPlatformModule::Get()->OpenDirectoryDialog(FSlateApplication::Get().FindBestParentWindowHandleForDialogs(nullptr), LOCTEXT("PackageDirectoryDialogTitle", "Package project...").ToString(), PackagingSettings->StagingDirectory.Path, OutFolderName))
 		{
 			return;
 		}
 
-		PlatformsSettings->StagingDirectory.Path = OutFolderName;
-		PlatformsSettings->SaveConfig();
+		PackagingSettings->StagingDirectory.Path = OutFolderName;
+		PackagingSettings->SaveConfig();
 		// @TODO: Check whether SaveConfig for AllPlatformPackagingSettings is still relevant/required now
 		AllPlatformPackagingSettings->SaveConfig();
 
 		BuildCookRunParams += TEXT(" -stage -archive -package");
 
 		const ITargetPlatform* TargetPlatform = GetTargetPlatformManager()->FindTargetPlatform(PlatformInfo->Name);
-		if (ShouldBuildProject(PackagingSettings, TargetPlatform))
+		if (ShouldBuildProject(PackagingSettings, TargetPlatform, UBTPlatformString))
 		{
 			BuildCookRunParams += TEXT(" -build");
 		}
@@ -1168,7 +1133,7 @@ void FEdgegapSettingsDetails::PackageProject(const FName IniPlatformName)
 			BuildCookRunParams += TEXT(" -applocaldirectory=\"$(EngineDir)/Binaries/ThirdParty/AppLocalDependencies\"");
 		}
 
-		BuildCookRunParams += FString::Printf(TEXT(" -archivedirectory=\"%s\""), *PlatformsSettings->StagingDirectory.Path);
+		BuildCookRunParams += FString::Printf(TEXT(" -archivedirectory=\"%s\""), *PackagingSettings->StagingDirectory.Path);
 
 		if (PackagingSettings->ForDistribution)
 		{
@@ -1181,7 +1146,7 @@ void FEdgegapSettingsDetails::PackageProject(const FName IniPlatformName)
 		}
 
 		// Whether to include the crash reporter.
-		if (PackagingSettings->IncludeCrashReporter && PlatformInfo->DataDrivenPlatformInfo->bCanUseCrashReporter)
+		if (PackagingSettings->IncludeCrashReporter && PlatformInfo->bCanUseCrashReporter)
 		{
 			BuildCookRunParams += TEXT(" -CrashReporter");
 		}
@@ -1191,16 +1156,11 @@ void FEdgegapSettingsDetails::PackageProject(const FName IniPlatformName)
 			BuildCookRunParams += FString::Printf(TEXT(" -manifests -createchunkinstall -chunkinstalldirectory=\"%s\" -chunkinstallversion=%s"), *(PackagingSettings->HttpChunkInstallDataDirectory.Path), *(PackagingSettings->HttpChunkInstallDataVersion));
 		}
 
-		EProjectPackagingBuildConfigurations BuildConfig = PlatformsSettings->GetBuildConfigurationForPlatform(IniPlatformName);
+		// In UE4.27, use EdgegapSettings->BuildConfiguration directly (no per-platform variant).
 		UEdgegapSettings* EdgegapSettings = GetMutableDefault<UEdgegapSettings>();
-		if(EdgegapSettings)
-		{
-			BuildConfig = EdgegapSettings->BuildConfiguration;
-		}
-		else
-		{
-			BuildConfig = EProjectPackagingBuildConfigurations::PPBC_Development;
-		}
+		EProjectPackagingBuildConfigurations BuildConfig = EdgegapSettings
+			? EdgegapSettings->BuildConfiguration
+			: EProjectPackagingBuildConfigurations::PPBC_Development;
 		const UProjectPackagingSettings::FConfigurationInfo& ConfigurationInfo = UProjectPackagingSettings::ConfigurationInfo[(int)BuildConfig];
 
 		BuildCookRunParams += FString::Printf(TEXT(" -server -noclient -serverconfig=%s"), LexToString(ConfigurationInfo.Configuration));
@@ -1211,20 +1171,15 @@ void FEdgegapSettingsDetails::PackageProject(const FName IniPlatformName)
 		}
 	}
 
-	FString TurnkeyParams = FString::Printf(TEXT("-command=VerifySdk -platform=%s -UpdateIfNeeded"), *UBTPlatformString);
-	if (!ProjectPath.IsEmpty())
-	{
-		TurnkeyParams.Appendf(TEXT(" -project=\"%s\""), *ProjectPath);
-	}
-
+	// UE4.27: No Turnkey; run BuildCookRun directly.
 	FString CommandLine;
 	if (!ProjectPath.IsEmpty())
 	{
 		CommandLine.Appendf(TEXT("-ScriptsForProject=\"%s\" "), *ProjectPath);
 	}
-	CommandLine.Appendf(TEXT("Turnkey %s BuildCookRun %s"), *TurnkeyParams, *BuildCookRunParams);
+	CommandLine.Appendf(TEXT("BuildCookRun %s"), *BuildCookRunParams);
 
-	IUATHelperModule::Get().CreateUatTask(CommandLine, PlatformInfo->DisplayName, ContentPrepDescription, ContentPrepTaskName, ContentPrepIcon, nullptr, &OnPackageCallaback);
+	IUATHelperModule::Get().CreateUatTask(CommandLine, PlatformInfo->DisplayName, ContentPrepDescription, ContentPrepTaskName, ContentPrepIcon, &OnPackageCallaback);
 }
 
 void FEdgegapSettingsDetails::AddMessageLog(const FText& Text, const FText& Detail, const FString& TutorialLink, const FString& DocumentationLink)
@@ -1258,9 +1213,8 @@ void FEdgegapSettingsDetails::Containerize(FString DockerFilePath, FString Start
 	_ImageName = FEdgegapSettingsDetails::MakeImageName(RegistryURL, ImageRepository, _AppName, Tag);
 
 	UProjectPackagingSettings* PackagingSettings = Cast<UProjectPackagingSettings>(UProjectPackagingSettings::StaticClass()->GetDefaultObject());
-	UPlatformsMenuSettings* PlatformsSettings = GetMutableDefault<UPlatformsMenuSettings>();
 
-	FString PathToServerBuild = FPaths::Combine(PlatformsSettings->StagingDirectory.Path, FString("LinuxServer"));
+	FString PathToServerBuild = FPaths::Combine(PackagingSettings->StagingDirectory.Path, FString("LinuxServer"));
 
 	FString DockerFileContent;
 	FString NewDockerFilePath = FPaths::Combine(ServerBuildPath, FPaths::GetCleanFilename(DockerFilePath));

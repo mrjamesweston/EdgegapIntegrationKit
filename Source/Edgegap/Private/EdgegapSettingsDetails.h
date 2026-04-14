@@ -65,7 +65,11 @@ public:
 
 typedef SCustomListView< TSharedPtr< struct FDeploymentStatusListItem > > SDeploymentStatusListItemListView;
 typedef TSharedPtr<IImageWrapper> IImageWrapperPtr;
+#if ENGINE_MAJOR_VERSION >= 5
 typedef PlatformInfo::FTargetPlatformInfo FPlatformInfo;
+#else
+typedef PlatformInfo::FPlatformInfo FPlatformInfo;
+#endif
 
 
 class SImagePreview : public SCompoundWidget
@@ -158,9 +162,15 @@ public:
 				if (ImageWrapper->GetRaw(ERGBFormat::BGRA, 8, UncompressedBGRA))
 				{
 					UTexture2D* mytex = UTexture2D::CreateTransient(ImageWrapper->GetWidth(), ImageWrapper->GetHeight(), PF_B8G8R8A8);
+#if ENGINE_MAJOR_VERSION >= 5
 					void* TextureData = mytex->GetPlatformData()->Mips[0].BulkData.Lock(LOCK_READ_WRITE);
 					FMemory::Memcpy(TextureData, UncompressedBGRA.GetData(), UncompressedBGRA.Num());
 					mytex->GetPlatformData()->Mips[0].BulkData.Unlock();
+#else
+					void* TextureData = mytex->PlatformData->Mips[0].BulkData.Lock(LOCK_READ_WRITE);
+					FMemory::Memcpy(TextureData, UncompressedBGRA.GetData(), UncompressedBGRA.Num());
+					mytex->PlatformData->Mips[0].BulkData.Unlock();
+#endif
 
 					// Update the rendering resource from data.
 					mytex->UpdateResource();
@@ -177,7 +187,11 @@ public:
 
 	const FSlateBrush* GetImageBrush() const
 	{
+#if ENGINE_MAJOR_VERSION >= 5
 		return SavedImageBrush.IsValid() ? SavedImageBrush.Get() : FAppStyle::Get().GetBrush("ExternalImagePicker.BlankImage");
+#else
+		return SavedImageBrush.IsValid() ? SavedImageBrush.Get() : FEditorStyle::GetBrush("ExternalImagePicker.BlankImage");
+#endif
 	}
 
 	static FString MakeImageName(const FString InRegistry, const FString InImageRepository, const FString InAppName, const FString InTag)

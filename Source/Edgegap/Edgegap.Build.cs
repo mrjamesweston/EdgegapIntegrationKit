@@ -7,7 +7,7 @@ using System.IO;
 
 public class Edgegap : ModuleRules
 {
-	
+
 	private string ModulePath
 	{
 
@@ -18,7 +18,7 @@ public class Edgegap : ModuleRules
 	}
 
 
-	
+
 	public Edgegap(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
@@ -57,30 +57,8 @@ public class Edgegap : ModuleRules
                 "JsonUtilities",
                 "ImageWrapper",
                 "SharedSettingsWidgets",
-                "ApplicationCore",
-                "DeveloperToolSettings",
-                "EngineSettings",
-                "InputCore",
-                "RHI",
-                "RenderCore",
-                "Slate",
-                "SlateCore",
-                "TargetPlatform",
-                "DesktopPlatform",
-                "WorkspaceMenuStructure",
-                "MessageLog",
-                 "Projects",
-                 "ToolMenus",
-                 "LauncherServices",
-                "SourceControl",
-                "EditorStyle",
-                "TurnkeyIO",
-                "UnrealEd",
-                "UATHelper",
-                "SettingsEditor",
-                "Zen",
                 "DeveloperSettings",
-                "DesktopWidgets"
+                "SettingsEditor",
             }
         );
 
@@ -95,21 +73,8 @@ public class Edgegap : ModuleRules
                 "SourceCodeAccess",
                 "LocalizationDashboard",
                 "UCMDHelper",
-                "Projects"
-            }
-        );
-
-        PrivateIncludePathModuleNames.AddRange(
-            new string[] {
-                    "AssetTools",
-                    "DesktopPlatform",
-                    "GameProjectGeneration",
-                    "ProjectTargetPlatformEditor",
-                    "LevelEditor",
-                    "Settings",
-                    "SourceCodeAccess",
-                    "LocalizationDashboard",
-                     "MainFrame",
+                "Projects",
+                "MainFrame",
             }
         );
 
