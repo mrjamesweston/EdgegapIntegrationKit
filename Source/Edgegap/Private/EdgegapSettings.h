@@ -80,7 +80,7 @@ public:
 	FString DockerPath = "C:\\Program Files\\Docker\\Docker\\resources\\bin\\docker.exe";
 
 	UPROPERTY(Config, EditAnywhere, Category = "Build Configurations", DisplayName = "Build Configurations")
-	EProjectPackagingBuildConfigurations BuildConfiguration = EProjectPackagingBuildConfigurations::PPBC_Development;
+	TEnumAsByte<EProjectPackagingBuildConfigurations> BuildConfiguration = EProjectPackagingBuildConfigurations::PPBC_Development;
 	
 	UPROPERTY(Config, EditAnywhere, Category = "Build Configurations", DisplayName = "Build Configurations")
 	FString OverridableTargetName = FString::Printf(TEXT("%sServer"), FApp::GetProjectName());
